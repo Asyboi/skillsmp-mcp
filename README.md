@@ -2,17 +2,10 @@
 
 [![PyPI](https://img.shields.io/pypi/v/skillsmp-mcp)](https://pypi.org/project/skillsmp-mcp/)
 
-A Python MCP server for [SkillsMP](https://skillsmp.com) that you own end to end:
+Python MCP server for [SkillsMP](https://skillsmp.com)
+
 search the catalogue, read a skill's `SKILL.md` straight from GitHub, run the
-**full** Cisco AI Skill Scanner (including the LLM semantic layer that "lite"
-wrappers skip), and install skills **only after they pass the scan**.
-
-## Why this exists
-
-SkillsMP publishes a REST API, not an official MCP server. Every `skillsmp-mcp-*`
-package on npm is third-party code. This server talks to SkillsMP with your key
-over exactly one host, fetches skills read-only from GitHub, and gates install on
-a real security scan — so there's nothing to trust but code you can read.
+**full** Cisco AI Skill Scanner + LLM scanner, and install skills **only after they pass the scan**.
 
 ## Tools
 
@@ -61,7 +54,7 @@ have `uv` installed (the server runs it via `uvx` on demand) or
 `pipx install cisco-ai-skill-scanner`. Without it, scans return `SKIPPED` and
 installs are blocked.
 
-Quick smoke test (no keys needed — completes the MCP handshake, lists the 4
+Quick smoke test (no keys needed — completes the MCP handshake, lists the 5
 tools, then exits):
 
 ```bash
@@ -69,11 +62,15 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
   | SKILLSMP_API_KEY=dummy uvx skillsmp-mcp
 ```
 
-## Configure & register with Claude Desktop
+## Configure & register with an MCP client
 
-Keys are supplied through the MCP server's `env` block in your Claude config —
-the code reads them from the process environment, which the client injects at
-launch. There is no `.env` file to manage.
+Keys are supplied through the MCP server's `env` block — the code reads them from
+the process environment, which the client injects at launch. There is no `.env`
+file to manage. Most clients share the same `command` / `args` / `env` JSON
+schema (Claude Desktop, Claude Code, Cursor); Codex uses TOML. Pick your client
+below.
+
+### Claude Desktop
 
 Add to `claude_desktop_config.json` (macOS:
 `~/Library/Application Support/Claude/claude_desktop_config.json`). Merge into
@@ -111,6 +108,59 @@ so the scanner is found when the server runs under the client:
 
 Fully quit and relaunch Claude Desktop after editing.
 
+### Claude Code
+
+Claude Code is separate from Claude Desktop — it does **not** read
+`claude_desktop_config.json`. Register it with the CLI:
+
+```bash
+claude mcp add skillsmp \
+  -e SKILLSMP_API_KEY=sk_live_... \
+  -e SKILL_SCANNER_LLM_API_KEY=sk-ant-... \
+  -- uvx skillsmp-mcp
+```
+
+By default the server is scoped to the current project; add `-s user` to make it
+available everywhere. Alternatively, commit a project-level `.mcp.json` at the
+repo root using the **same** `command`/`args`/`env` schema as the Claude Desktop
+block above. A project `.mcp.json` is also the place to set a repo-local install
+root — e.g. `"SKILLSMP_INSTALL_DIR": ".claude/skills"` — so install/uninstall
+write into the repo instead of `~/.claude/skills`.
+
+### Cursor
+
+Cursor uses the same JSON schema as Claude Desktop, in `~/.cursor/mcp.json`
+(global) or `.cursor/mcp.json` (project). Merge into `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "skillsmp": {
+      "command": "/Users/you/.local/bin/uvx",
+      "args": ["skillsmp-mcp"],
+      "env": {
+        "SKILLSMP_API_KEY": "sk_live_...",
+        "SKILL_SCANNER_LLM_API_KEY": "sk-ant-..."
+      }
+    }
+  }
+}
+```
+
+Like Claude Desktop, Cursor is a GUI app that won't inherit your shell `PATH` —
+use absolute paths for `command` and `SKILLSMP_SCANNER_CMD` (see the note above).
+
+### Codex
+
+Codex uses TOML at `~/.codex/config.toml`. Add an `mcp_servers` table:
+
+```toml
+[mcp_servers.skillsmp]
+command = "uvx"
+args = ["skillsmp-mcp"]
+env = { SKILLSMP_API_KEY = "sk_live_...", SKILL_SCANNER_LLM_API_KEY = "sk-ant-..." }
+```
+
 ## Environment variables
 
 | Var | Required | Default | Purpose |
@@ -119,7 +169,7 @@ Fully quit and relaunch Claude Desktop after editing.
 | `SKILL_SCANNER_LLM_API_KEY` | recommended | — | Enables the LLM semantic analyzer. |
 | `SKILL_SCANNER_LLM_MODEL` | no | `anthropic/claude-sonnet-5` | LiteLLM model string. |
 | `GITHUB_TOKEN` | no | — | Read-only PAT; raises GitHub rate limit. |
-| `SKILLSMP_INSTALL_DIR` | no | `~/.claude/skills` | Install/uninstall root. For repo-local skills, set it to e.g. `.claude/skills` in a project-scoped `.mcp.json`; both `install_skill` and `uninstall_skills` then operate on that root. |
+| `SKILLSMP_INSTALL_DIR` | no | `~/.claude/skills` | Install/uninstall root. For repo-local skills, set it to e.g. `.claude/skills` in a project-scoped `.mcp.json`; both `install_skills` and `uninstall_skills` then operate on that root. |
 | `SKILLSMP_BLOCK_SEVERITIES` | no | `HIGH,CRITICAL` | Severities that block install. |
 | `SKILLSMP_SCANNER_CMD` | no | auto-detect | Override the scanner command. |
 | `SKILLSMP_SCANNER_POLICY` | no | — | Cisco policy preset (e.g. `strict`). |
@@ -146,30 +196,6 @@ way.
   different sources can't collide and a crafted name can't escape the install root.
 - A clean scan is **not** a safety guarantee — it means no known patterns matched.
   Read the `SKILL.md` yourself; `read_skill` labels it untrusted for that reason.
-
-## Where to add your own touches
-
-- `config.py` — new env tunables, stricter `BLOCK_SEVERITIES`, install target.
-- `scanner.py` — analyzer selection, extra engines, custom result parsing.
-- `installer.py` — post-install hooks (e.g. write an index entry to a vault).
-- `server.py` — register more `@mcp.tool()` functions.
-
-## Development
-
-Work from a clone (contributors / local changes):
-
-```bash
-git clone https://github.com/Asyboi/skillsmp-mcp.git
-cd skillsmp-mcp
-uv venv
-uv pip install -e ".[dev]"
-pytest                       # full suite (unit + parsing + gating)
-python -m py_compile src/skillsmp_mcp/*.py
-```
-
-Tests are offline by default — network clients are driven with
-`httpx.MockTransport` and the scanner logic is unit-tested with fake reports, so
-`pytest` needs no keys or the Cisco scanner.
 
 ## License
 
