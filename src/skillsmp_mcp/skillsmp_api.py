@@ -29,10 +29,9 @@ class Skill:
     github_url: str | None = None
     skill_url: str | None = None
     tags: list[str] = field(default_factory=list)
-    score: float | None = None
 
 
-def _skill_from_dict(raw: dict[str, Any], score: float | None = None) -> Skill:
+def _skill_from_dict(raw: dict[str, Any]) -> Skill:
     return Skill(
         id=_str_or_none(raw.get("id")),
         name=str(raw.get("name") or ""),
@@ -43,7 +42,6 @@ def _skill_from_dict(raw: dict[str, Any], score: float | None = None) -> Skill:
         github_url=_str_or_none(raw.get("githubUrl") or raw.get("github_url")),
         skill_url=_str_or_none(raw.get("skillUrl") or raw.get("skill_url")),
         tags=list(raw.get("tags") or []),
-        score=score if score is not None else _float_or_none(raw.get("score")),
     )
 
 
@@ -54,13 +52,6 @@ def _str_or_none(v: Any) -> str | None:
 def _int_or_none(v: Any) -> int | None:
     try:
         return int(v) if v is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _float_or_none(v: Any) -> float | None:
-    try:
-        return float(v) if v is not None else None
     except (TypeError, ValueError):
         return None
 
@@ -78,27 +69,6 @@ def parse_search_response(payload: dict[str, Any]) -> list[Skill]:
     _require_success(payload)
     data = payload.get("data") or {}
     return [_skill_from_dict(s) for s in (data.get("skills") or [])]
-
-
-def parse_ai_search_response(payload: dict[str, Any]) -> list[Skill]:
-    _require_success(payload)
-    data = payload.get("data") or {}
-    results: list[Skill] = []
-    for item in data.get("data") or []:
-        score = _float_or_none(item.get("score"))
-        nested = item.get("skill")
-        if isinstance(nested, dict):
-            results.append(_skill_from_dict(nested, score=score))
-        else:
-            # No embedded skill object — surface what we have (filename/file_id).
-            results.append(
-                Skill(
-                    id=_str_or_none(item.get("file_id")),
-                    name=str(item.get("filename") or item.get("file_id") or ""),
-                    score=score,
-                )
-            )
-    return results
 
 
 class SkillsMPClient:
@@ -162,7 +132,3 @@ class SkillsMPClient:
         params = {"q": query, "page": page, "limit": limit, "sortBy": sort_by}
         payload = await self._get("/skills/search", params)
         return parse_search_response(payload)
-
-    async def ai_search(self, query: str) -> list[Skill]:
-        payload = await self._get("/skills/ai-search", {"q": query})
-        return parse_ai_search_response(payload)

@@ -17,7 +17,6 @@ a real security scan — so there's nothing to trust but code you can read.
 | Tool | What it does |
 |------|--------------|
 | `search_skills(query, limit, sort_by)` | Keyword search (`sort_by`: `stars`/`recent`). |
-| `ai_search_skills(query)` | Natural-language semantic search. |
 | `read_skill(repo, skill_name)` | Fetch `SKILL.md` from a GitHub `owner/repo`, **read-only**. Never scans, never spawns a subprocess, never installs. |
 | `scan_skill(repo, skill_name)` | Full Cisco scan; reports findings only. |
 | `install_skill(repo, skill_name, force=False)` | Scan-gated install. Refuses on HIGH/CRITICAL unless `force=True`. |

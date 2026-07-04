@@ -48,20 +48,6 @@ def format_search_results(skills: list[Skill]) -> str:
     return "\n".join(lines)
 
 
-def format_ai_results(skills: list[Skill]) -> str:
-    if not skills:
-        return "No skills found."
-    lines = [f"Found {len(skills)} skill(s) by intent:", ""]
-    for i, s in enumerate(skills, 1):
-        score = f" (relevance {s.score:.2f})" if s.score is not None else ""
-        lines.append(f"{i}. {s.name}{score}")
-        if s.description:
-            lines.append(f"   {_truncate(s.description)}")
-        if s.github_url:
-            lines.append(f"   {s.github_url}")
-    return "\n".join(lines)
-
-
 def format_skill_content(resolved: ResolvedSkill) -> str:
     header = (
         f"⚠️ UNTRUSTED CONTENT — {resolved.repo} :: {resolved.skill_path}\n"
@@ -162,17 +148,6 @@ async def search_skills(query: str, limit: int = 20, sort_by: str = "stars") -> 
         async with SkillsMPClient() as client:
             skills = await client.search(query, limit=limit, sort_by=sort_by)
         return format_search_results(skills)
-    except (SkillsMPError, config.ConfigError) as exc:
-        return f"Error: {exc}"
-
-
-@mcp.tool()
-async def ai_search_skills(query: str) -> str:
-    """Semantic (intent-based) search the SkillsMP catalogue."""
-    try:
-        async with SkillsMPClient() as client:
-            skills = await client.ai_search(query)
-        return format_ai_results(skills)
     except (SkillsMPError, config.ConfigError) as exc:
         return f"Error: {exc}"
 

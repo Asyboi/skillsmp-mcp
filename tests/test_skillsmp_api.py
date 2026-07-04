@@ -39,31 +39,6 @@ def test_parse_search_response_rejects_success_false():
         skillsmp_api.parse_search_response({"success": False, "error": "nope"})
 
 
-def test_parse_ai_search_response_extracts_score_and_nested_skill():
-    payload = {
-        "success": True,
-        "data": {
-            "data": [
-                {
-                    "file_id": "f1",
-                    "filename": "SKILL.md",
-                    "score": 0.91,
-                    "skill": {
-                        "id": "9",
-                        "name": "semantic-thing",
-                        "description": "does things",
-                        "githubUrl": "https://github.com/o/r",
-                    },
-                }
-            ],
-            "has_more": False,
-            "next_page": None,
-        },
-    }
-    skills = skillsmp_api.parse_ai_search_response(payload)
-    assert len(skills) == 1
-    assert skills[0].name == "semantic-thing"
-    assert skills[0].score == pytest.approx(0.91)
 
 
 async def _client_with_transport(handler):

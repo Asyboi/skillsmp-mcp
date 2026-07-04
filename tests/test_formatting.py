@@ -20,11 +20,6 @@ def test_format_search_results_empty():
     assert "no" in server.format_search_results([]).lower()
 
 
-def test_format_ai_results_shows_score():
-    out = server.format_ai_results([Skill(name="x", score=0.87)])
-    assert "0.87" in out
-
-
 def test_format_skill_content_has_untrusted_banner():
     resolved = ResolvedSkill(repo="o/r", skill_path="s/SKILL.md", skill_md="# Hello")
     out = server.format_skill_content(resolved)
