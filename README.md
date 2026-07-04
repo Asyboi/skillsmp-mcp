@@ -1,5 +1,7 @@
 # skillsmp-mcp
 
+[![PyPI](https://img.shields.io/pypi/v/skillsmp-mcp)](https://pypi.org/project/skillsmp-mcp/)
+
 A Python MCP server for [SkillsMP](https://skillsmp.com) that you own end to end:
 search the catalogue, read a skill's `SKILL.md` straight from GitHub, run the
 **full** Cisco AI Skill Scanner (including the LLM semantic layer that "lite"
@@ -34,28 +36,36 @@ a real security scan — so there's nothing to trust but code you can read.
 
 ## Install
 
+The package is on [PyPI](https://pypi.org/project/skillsmp-mcp/). The simplest
+path is to let [`uvx`](https://docs.astral.sh/uv/) fetch and run it on demand —
+nothing to install or keep updated:
+
 ```bash
-git clone https://github.com/Asyboi/skillsmp-mcp.git
-cd skillsmp-mcp
-
-# create an isolated env and install (uv shown; plain venv + pip works too)
-uv venv
-uv pip install -e .
-
-# optional: install the scanner directly instead of relying on uvx
-uv pip install cisco-ai-skill-scanner
+uvx skillsmp-mcp          # runs the server (reads keys from the environment)
 ```
 
-This installs two ways to launch the server (use whichever your client prefers):
+Or install a persistent command:
 
-- the console script **`skillsmp-mcp`** (on PATH inside the venv), or
-- **`python -m skillsmp_mcp`** — portable, no PATH juggling.
+```bash
+pipx install skillsmp-mcp     # isolated global command (recommended)
+# or
+pip install skillsmp-mcp      # into the current environment
+```
 
-Quick smoke test (no keys needed — lists the 4 tools over stdio, then exits):
+Either install gives you two ways to launch it — the **`skillsmp-mcp`** console
+script and **`python -m skillsmp_mcp`** (handy when the script isn't on PATH).
+
+For `scan_skill` / `install_skill` you also need the Cisco scanner reachable:
+have `uv` installed (the server runs it via `uvx` on demand) or
+`pipx install cisco-ai-skill-scanner`. Without it, scans return `SKIPPED` and
+installs are blocked.
+
+Quick smoke test (no keys needed — completes the MCP handshake, lists the 4
+tools, then exits):
 
 ```bash
 printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}\n' \
-  | SKILLSMP_API_KEY=dummy .venv/bin/skillsmp-mcp
+  | SKILLSMP_API_KEY=dummy uvx skillsmp-mcp
 ```
 
 ## Configure & register with Claude Desktop
@@ -70,7 +80,8 @@ Add to `claude_desktop_config.json` (macOS:
 
 ```json
 "skillsmp": {
-  "command": "/absolute/path/to/skillsmp-mcp/.venv/bin/skillsmp-mcp",
+  "command": "/Users/you/.local/bin/uvx",
+  "args": ["skillsmp-mcp"],
   "env": {
     "SKILLSMP_API_KEY": "sk_live_...",
     "SKILL_SCANNER_LLM_API_KEY": "sk-ant-...",
@@ -84,13 +95,14 @@ too so the semantic analyzer runs — without it, scans fall back to static +
 behavioral only and can miss prose-based prompt injection. All other variables
 (see the table below) are optional and go in the same `env` block.
 
-**Use an absolute path for `command`.** GUI apps like Claude Desktop don't
-inherit your shell `PATH`, so a bare `skillsmp-mcp` often won't resolve. Point at
-the venv binary (shown above) — or use
-`"command": "/abs/path/.venv/bin/python", "args": ["-m", "skillsmp_mcp"]`.
+**Use absolute paths for `command`.** GUI apps like Claude Desktop don't inherit
+your shell `PATH`, so a bare `uvx` (or `skillsmp-mcp`) often won't resolve. Run
+`which uvx` to get the full path and use that (as shown above). If you installed
+with `pipx` instead, point `command` straight at the installed script — find it
+with `which skillsmp-mcp` — and drop the `args` line.
 
-For the same reason, if you rely on `uvx` to run the scanner, set
-`SKILLSMP_SCANNER_CMD` to its absolute path so scanning works under the client:
+For the same PATH reason, set `SKILLSMP_SCANNER_CMD` to the absolute `uvx` path
+so the scanner is found when the server runs under the client:
 
 ```json
 "SKILLSMP_SCANNER_CMD": "/Users/you/.local/bin/uvx --from cisco-ai-skill-scanner skill-scanner"
@@ -142,7 +154,12 @@ way.
 
 ## Development
 
+Work from a clone (contributors / local changes):
+
 ```bash
+git clone https://github.com/Asyboi/skillsmp-mcp.git
+cd skillsmp-mcp
+uv venv
 uv pip install -e ".[dev]"
 pytest                       # full suite (unit + parsing + gating)
 python -m py_compile src/skillsmp_mcp/*.py
