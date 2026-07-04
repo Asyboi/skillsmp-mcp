@@ -21,14 +21,14 @@ a real security scan — so there's nothing to trust but code you can read.
 | `search_skills(query, limit, sort_by)` | Keyword search (`sort_by`: `stars`/`recent`). |
 | `read_skill(repo, skill_name)` | Fetch `SKILL.md` from a GitHub `owner/repo`, **read-only**. Never scans, never spawns a subprocess, never installs. |
 | `scan_skill(repo, skill_name)` | Full Cisco scan; reports findings only. |
-| `install_skill(repo, skill_name, force=False)` | Scan-gated install. Refuses on HIGH/CRITICAL unless `force=True`. |
-| `uninstall_skills(repo, skill_names)` | Remove one or more installed skills (bulk). No scan/network; reports per-skill results (removed / not installed / error). |
+| `install_skills(skills, force=False)` | Scan-gated bulk install. `skills` is a list of `owner/repo:skill_name` specs (may span multiple repos). Each is resolved, scanned, and gated independently; refuses HIGH/CRITICAL unless `force=True`. Reports per-skill results without aborting the batch on one failure. |
+| `uninstall_skills(skills)` | Remove installed skills (bulk). `skills` is a list of `owner/repo:skill_name` specs (may span multiple repos). No scan/network; reports per-skill results (removed / not installed / error). |
 
 ## Requirements
 
 - **Python 3.10+**
 - A **SkillsMP API key** (`sk_live_...`) from [skillsmp.com](https://skillsmp.com) — the only hard requirement.
-- For `scan_skill` / `install_skill`: either [`uv`](https://docs.astral.sh/uv/)
+- For `scan_skill` / `install_skills`: either [`uv`](https://docs.astral.sh/uv/)
   installed (the server runs the scanner via `uvx` on demand) **or** the
   `cisco-ai-skill-scanner` package installed directly. Without either, scans
   return `SKIPPED` and installs are blocked.
@@ -56,7 +56,7 @@ pip install skillsmp-mcp      # into the current environment
 Either install gives you two ways to launch it — the **`skillsmp-mcp`** console
 script and **`python -m skillsmp_mcp`** (handy when the script isn't on PATH).
 
-For `scan_skill` / `install_skill` you also need the Cisco scanner reachable:
+For `scan_skill` / `install_skills` you also need the Cisco scanner reachable:
 have `uv` installed (the server runs it via `uvx` on demand) or
 `pipx install cisco-ai-skill-scanner`. Without it, scans return `SKIPPED` and
 installs are blocked.
@@ -138,9 +138,10 @@ way.
 - Skill files are fetched read-only, written to a private temp dir for scanning,
   and that dir is deleted afterward. Cisco's analysis is static/AST — nothing is
   executed.
-- `install_skill` refuses HIGH/CRITICAL findings unless forced, refuses to
-  install unscanned (scanner missing) unless forced, and never silently
-  overwrites — re-installing an existing skill folder also requires `force=True`.
+- `install_skills` scans and gates each skill independently: it refuses
+  HIGH/CRITICAL findings unless forced, refuses to install unscanned (scanner
+  missing) unless forced, and never silently overwrites — re-installing an
+  existing skill folder also requires `force=True`.
 - Installs are namespaced as `<owner>-<repo>__<skill-dir>` so skills from
   different sources can't collide and a crafted name can't escape the install root.
 - A clean scan is **not** a safety guarantee — it means no known patterns matched.

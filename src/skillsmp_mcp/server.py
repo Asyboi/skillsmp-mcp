@@ -1,19 +1,21 @@
 """FastMCP server: registers the five SkillsMP tools and formats their output.
 
 Tool separation (SR9, §7): ``read_skill`` is pure read — no subprocess, no
-scan. ``scan_skill`` is the separately approvable scan. ``install_skill`` always
+scan. ``scan_skill`` is the separately approvable scan. ``install_skills`` always
 scans internally as its install gate.
 """
 
 from __future__ import annotations
 
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from . import config, scanner
 from .github import GitHubClient, GitHubError, ResolvedSkill, parse_repo
+from .installer import InstallResult, UninstallResult
 from .installer import install as do_install
 from .installer import uninstall as do_uninstall
 from .scanner import ScanResult
@@ -53,7 +55,7 @@ def format_skill_content(resolved: ResolvedSkill) -> str:
     header = (
         f"⚠️ UNTRUSTED CONTENT — {resolved.repo} :: {resolved.skill_path}\n"
         "This SKILL.md was fetched read-only and has NOT been scanned. Review it "
-        "yourself before acting on it. Run scan_skill before install_skill.\n"
+        "yourself before acting on it. Run scan_skill before install_skills.\n"
         + "=" * 60
     )
     parts = [header, resolved.skill_md]
@@ -109,6 +111,33 @@ def format_install_result(result, scan: ScanResult) -> str:
     )
 
 
+@dataclass
+class SkillInstallOutcome:
+    """One skill's result within an ``install_skills`` batch.
+
+    Exactly one of ``result`` (resolved + scanned) or ``error`` (resolve failed
+    or the name was ambiguous) is set.
+    """
+
+    skill_name: str
+    scan: ScanResult | None
+    result: InstallResult | None
+    error: str | None
+
+
+def format_install_results(outcomes: list[SkillInstallOutcome]) -> str:
+    installed = sum(1 for o in outcomes if o.result and o.result.installed)
+    blocks = [f"Installed {installed}/{len(outcomes)} skill(s).", ""]
+    for o in outcomes:
+        blocks.append("=" * 60)
+        if o.error is not None:
+            blocks.append(f"❗ {o.skill_name}:\n{o.error}")
+        else:
+            blocks.append(f"▶ {o.skill_name}")
+            blocks.append(format_install_result(o.result, o.scan))
+    return "\n".join(blocks)
+
+
 _UNINSTALL_ICON = {"removed": "🗑️", "not_installed": "•", "error": "❗"}
 _UNINSTALL_LABEL = {"removed": "removed", "not_installed": "not installed", "error": "error"}
 
@@ -135,6 +164,24 @@ async def _resolve(repo: str, skill_name: str):
     if isinstance(result, list):
         return format_disambiguation(f"{owner}/{name}", result)
     return result
+
+
+def _parse_skill_spec(spec: str) -> tuple[str, str, str]:
+    """Parse an ``owner/repo:skill_name`` spec into ``(owner, repo, skill_name)``.
+
+    Split on the LAST ``:`` — skill directory names never contain a colon, so
+    any URL-scheme colon (``https://…``) stays with the repo part, which
+    ``parse_repo`` then normalizes. Raises ``GitHubError`` on a malformed spec.
+    """
+    repo_str, sep, skill_name = spec.rpartition(":")
+    skill_name = skill_name.strip()
+    if not sep or not skill_name:
+        raise GitHubError(
+            f"Invalid skill spec {spec!r}. Expected 'owner/repo:skill_name' "
+            "(e.g. 'anthropics/skills:pdf')."
+        )
+    owner, name = parse_repo(repo_str)
+    return owner, name, skill_name
 
 
 def _scan_resolved(resolved: ResolvedSkill) -> ScanResult:
@@ -200,43 +247,59 @@ async def scan_skill(repo: str, skill_name: str) -> str:
 
 
 @mcp.tool()
-async def install_skill(repo: str, skill_name: str, force: bool = False) -> str:
-    """Scan-gated install. Refuses HIGH/CRITICAL, unscanned, or existing folder
-    unless force=True."""
-    try:
-        resolved = await _resolve(repo, skill_name)
-    except GitHubError as exc:
-        return f"Error: {exc}"
-    if isinstance(resolved, str):
-        return resolved
-    scan = _scan_resolved(resolved)
-    result = do_install(
-        resolved,
-        scan,
-        install_root=config.install_dir(),
-        force=force,
-        block_severities=config.block_severities(),
-    )
-    return format_install_result(result, scan)
+async def install_skills(skills: list[str], force: bool = False) -> str:
+    """Scan-gated bulk install of one or more skills, each ``owner/repo:skill_name``.
+
+    Skills may come from different repos in one call. Each is resolved, scanned,
+    and gated independently: refuses HIGH/CRITICAL findings, an unscanned skill,
+    or an existing folder unless force=True. Processes every spec and reports
+    per-skill results; a malformed spec, resolve failure, ambiguous name, or
+    blocked scan for one skill does not abort the rest of the batch. ``force``
+    applies to the whole batch.
+    """
+    root = config.install_dir()
+    block = config.block_severities()
+    outcomes: list[SkillInstallOutcome] = []
+    for spec in skills:
+        try:
+            owner, name, skill_name = _parse_skill_spec(spec)
+            resolved = await _resolve(f"{owner}/{name}", skill_name)
+        except GitHubError as exc:
+            outcomes.append(SkillInstallOutcome(spec, None, None, f"Error: {exc}"))
+            continue
+        if isinstance(resolved, str):  # ambiguous — disambiguation message
+            outcomes.append(SkillInstallOutcome(spec, None, None, resolved))
+            continue
+        scan = _scan_resolved(resolved)
+        result = do_install(
+            resolved, scan, install_root=root, force=force, block_severities=block
+        )
+        outcomes.append(SkillInstallOutcome(spec, scan, result, None))
+    return format_install_results(outcomes)
 
 
 @mcp.tool()
-async def uninstall_skills(repo: str, skill_names: list[str]) -> str:
-    """Remove one or more installed skills from the install root (SKILLSMP_INSTALL_DIR).
+async def uninstall_skills(skills: list[str]) -> str:
+    """Remove one or more installed skills, each ``owner/repo:skill_name``.
 
-    Deletes the same ``<owner>-<repo>__<skill-dir>`` folders that install_skill
-    wrote — no scan, no network. Processes every name and reports per-skill
-    results (removed / not installed / error); a missing skill does not abort
-    the batch. Only removes folders matching the install namespacing scheme,
-    and never outside the install root.
+    Skills may come from different repos in one call. Deletes the same
+    ``<owner>-<repo>__<skill-dir>`` folders that install_skills wrote — no scan,
+    no network. Processes every spec and reports per-skill results (removed /
+    not installed / error); a malformed spec or missing skill does not abort the
+    batch. Only removes folders matching the install namespacing scheme, and
+    never outside the install root.
     """
-    try:
-        owner, name = parse_repo(repo)
-    except GitHubError as exc:
-        return f"Error: {exc}"
-
     root = config.install_dir()
-    results = [do_uninstall(owner, name, sn, install_root=root) for sn in skill_names]
+    results = []
+    for spec in skills:
+        try:
+            owner, name, skill_name = _parse_skill_spec(spec)
+        except GitHubError as exc:
+            results.append(UninstallResult(spec, "", "error", str(exc)))
+            continue
+        result = do_uninstall(owner, name, skill_name, install_root=root)
+        result.skill_name = spec  # label the report line with the full spec
+        results.append(result)
     return format_uninstall_results(results, root)
 
 

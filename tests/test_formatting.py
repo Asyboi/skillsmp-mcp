@@ -84,3 +84,32 @@ def test_format_install_result_refusal():
     out = server.format_install_result(res, scan)
     assert "HIGH" in out
     assert "force" in out.lower()
+
+
+def test_format_install_results_batch_mixed():
+    from pathlib import Path
+
+    ok = server.SkillInstallOutcome(
+        "alpha",
+        ScanResult(available=True, status="SAFE", max_severity="LOW"),
+        InstallResult(True, "o-r__alpha", Path("/tmp/o-r__alpha"), "clean"),
+        None,
+    )
+    blocked = server.SkillInstallOutcome(
+        "beta",
+        ScanResult(available=True, status="UNSAFE", max_severity="HIGH"),
+        InstallResult(False, "o-r__beta", None, "max severity HIGH is blocked"),
+        None,
+    )
+    errored = server.SkillInstallOutcome("gamma", None, None, "Error: no SKILL.md found")
+
+    out = server.format_install_results([ok, blocked, errored])
+
+    # batch summary counts only successful installs
+    assert "1/3" in out
+    # every skill is represented
+    assert "alpha" in out and "beta" in out and "gamma" in out
+    # blocked skill surfaces its reason + force hint; error surfaces its message
+    assert "HIGH" in out
+    assert "force" in out.lower()
+    assert "no SKILL.md" in out

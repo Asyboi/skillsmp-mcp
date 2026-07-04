@@ -23,6 +23,22 @@ class _FakeGH:
         return self._result
 
 
+class _MapGH:
+    """Resolve each 'owner/repo:skill' spec to a distinct result in one batch."""
+
+    def __init__(self, mapping):
+        self._mapping = mapping
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def resolve_skill(self, owner, repo, skill_name):
+        return self._mapping[f"{owner}/{repo}:{skill_name}"]
+
+
 @pytest.fixture
 def no_subprocess(monkeypatch):
     """Fail loudly if anything spawns a subprocess during the test."""
@@ -74,25 +90,115 @@ async def test_scan_skill_invokes_scanner(monkeypatch):
     assert not called["dir"].exists()
 
 
-async def test_uninstall_skills_batch_mixed(monkeypatch, no_subprocess, tmp_path):
+def _resolved(repo, skill_dir, body=b"# ok"):
+    return ResolvedSkill(
+        repo=repo, skill_path=f"{skill_dir}/SKILL.md", skill_md=body.decode(),
+        files={"SKILL.md": body},
+    )
+
+
+async def test_install_skills_installs_across_repos(monkeypatch, tmp_path):
+    from skillsmp_mcp import config
+
+    # Two skills from two DIFFERENT repos in a single call.
+    mapping = {
+        "anthropics/skills:pdf": _resolved("anthropics/skills", "pdf"),
+        "octocat/hello:greet": _resolved("octocat/hello", "greet"),
+    }
+    monkeypatch.setattr(server, "GitHubClient", lambda *a, **k: _MapGH(mapping))
+    monkeypatch.setattr(
+        scanner, "scan_directory",
+        lambda d: ScanResult(available=True, status="SAFE", max_severity="LOW"),
+    )
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
+
+    out = await server.install_skills(["anthropics/skills:pdf", "octocat/hello:greet"])
+
+    assert (tmp_path / "anthropics-skills__pdf" / "SKILL.md").exists()
+    assert (tmp_path / "octocat-hello__greet" / "SKILL.md").exists()
+    assert "2/2" in out
+
+
+async def test_install_skills_gates_per_skill(monkeypatch, tmp_path):
+    from skillsmp_mcp import config
+
+    mapping = {
+        "o/r:good": _resolved("o/r", "good"),
+        "o/r:bad": _resolved("o/r", "bad", b"# BAD"),
+    }
+    monkeypatch.setattr(server, "GitHubClient", lambda *a, **k: _MapGH(mapping))
+
+    def fake_scan(scan_dir):
+        content = (scan_dir / "SKILL.md").read_text()
+        if "BAD" in content:
+            return ScanResult(available=True, status="UNSAFE", max_severity="HIGH")
+        return ScanResult(available=True, status="SAFE", max_severity="LOW")
+
+    monkeypatch.setattr(scanner, "scan_directory", fake_scan)
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
+
+    out = await server.install_skills(["o/r:good", "o/r:bad"])
+
+    assert (tmp_path / "o-r__good").exists()
+    assert not (tmp_path / "o-r__bad").exists()  # blocked by HIGH severity
+    assert "1/2" in out
+    assert "force" in out.lower()
+
+
+async def test_install_skills_reports_errors_without_aborting(monkeypatch, tmp_path):
+    from skillsmp_mcp import config
+
+    # One good, one ambiguous (disambiguation list), one malformed spec — the
+    # good one must still install.
+    mapping = {
+        "o/r:good": _resolved("o/r", "good"),
+        "o/r:amb": ["x/SKILL.md", "y/SKILL.md"],
+    }
+    monkeypatch.setattr(server, "GitHubClient", lambda *a, **k: _MapGH(mapping))
+    monkeypatch.setattr(
+        scanner, "scan_directory",
+        lambda d: ScanResult(available=True, status="SAFE", max_severity="LOW"),
+    )
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
+
+    out = await server.install_skills(["o/r:good", "o/r:amb", "garbage-no-colon"])
+
+    assert (tmp_path / "o-r__good").exists()
+    assert "x/SKILL.md" in out  # disambiguation surfaced for the ambiguous one
+    assert "garbage-no-colon" in out  # malformed spec reported, not fatal
+    assert "1/3" in out
+
+
+async def test_install_skills_malformed_spec_reported(no_subprocess):
+    out = await server.install_skills(["not-a-valid-spec"])
+    assert "error" in out.lower() or "invalid" in out.lower()
+
+
+async def test_uninstall_skills_across_repos(monkeypatch, no_subprocess, tmp_path):
     from skillsmp_mcp import config
 
     # install_dir drives both install and uninstall; point it at a temp root.
     monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
-    installed = tmp_path / "anthropics-skills__pdf"
-    installed.mkdir(parents=True)
-    (installed / "SKILL.md").write_text("# PDF")
+    a = tmp_path / "anthropics-skills__pdf"
+    a.mkdir(parents=True)
+    b = tmp_path / "octocat-hello__greet"
+    b.mkdir(parents=True)
 
-    out = await server.uninstall_skills("anthropics/skills", ["pdf", "ghost"])
+    out = await server.uninstall_skills(
+        ["anthropics/skills:pdf", "octocat/hello:greet", "anthropics/skills:ghost"]
+    )
 
-    # The installed one is gone; the missing one is reported, not fatal.
-    assert not installed.exists()
-    assert "pdf" in out
-    assert "ghost" in out
+    # Both installed folders (from different repos) are gone; the missing one is
+    # reported, not fatal.
+    assert not a.exists()
+    assert not b.exists()
     assert "removed" in out.lower()
     assert "not installed" in out.lower()
 
 
-async def test_uninstall_skills_bad_repo_rejected(no_subprocess):
-    out = await server.uninstall_skills("not-a-repo", ["pdf"])
+async def test_uninstall_skills_malformed_spec_reported(no_subprocess, monkeypatch, tmp_path):
+    from skillsmp_mcp import config
+
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
+    out = await server.uninstall_skills(["no-colon-here"])
     assert "error" in out.lower()
