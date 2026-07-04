@@ -1,4 +1,4 @@
-"""FastMCP server: registers the four SkillsMP tools and formats their output.
+"""FastMCP server: registers the five SkillsMP tools and formats their output.
 
 Tool separation (SR9, §7): ``read_skill`` is pure read — no subprocess, no
 scan. ``scan_skill`` is the separately approvable scan. ``install_skill`` always
@@ -15,6 +15,7 @@ from mcp.server.fastmcp import FastMCP
 from . import config, scanner
 from .github import GitHubClient, GitHubError, ResolvedSkill, parse_repo
 from .installer import install as do_install
+from .installer import uninstall as do_uninstall
 from .scanner import ScanResult
 from .skillsmp_api import Skill, SkillsMPClient, SkillsMPError
 
@@ -106,6 +107,20 @@ def format_install_result(result, scan: ScanResult) -> str:
         f"{summary}\n\n🚫 Install refused: {result.reason}\n"
         "Re-run with force=True to override (you accept the risk)."
     )
+
+
+_UNINSTALL_ICON = {"removed": "🗑️", "not_installed": "•", "error": "❗"}
+_UNINSTALL_LABEL = {"removed": "removed", "not_installed": "not installed", "error": "error"}
+
+
+def format_uninstall_results(results, install_root) -> str:
+    removed = sum(1 for r in results if r.status == "removed")
+    lines = [f"Uninstall from {install_root} — {removed}/{len(results)} removed:", ""]
+    for r in results:
+        icon = _UNINSTALL_ICON.get(r.status, "•")
+        label = _UNINSTALL_LABEL.get(r.status, r.status)
+        lines.append(f"{icon} {r.skill_name} ({r.folder_name}): {label} — {r.reason}")
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------
@@ -203,6 +218,26 @@ async def install_skill(repo: str, skill_name: str, force: bool = False) -> str:
         block_severities=config.block_severities(),
     )
     return format_install_result(result, scan)
+
+
+@mcp.tool()
+async def uninstall_skills(repo: str, skill_names: list[str]) -> str:
+    """Remove one or more installed skills from the install root (SKILLSMP_INSTALL_DIR).
+
+    Deletes the same ``<owner>-<repo>__<skill-dir>`` folders that install_skill
+    wrote — no scan, no network. Processes every name and reports per-skill
+    results (removed / not installed / error); a missing skill does not abort
+    the batch. Only removes folders matching the install namespacing scheme,
+    and never outside the install root.
+    """
+    try:
+        owner, name = parse_repo(repo)
+    except GitHubError as exc:
+        return f"Error: {exc}"
+
+    root = config.install_dir()
+    results = [do_uninstall(owner, name, sn, install_root=root) for sn in skill_names]
+    return format_uninstall_results(results, root)
 
 
 def main() -> None:

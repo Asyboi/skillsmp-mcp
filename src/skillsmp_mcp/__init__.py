@@ -1,3 +1,3 @@
-"""SkillsMP MCP server: search, read, scan, and scan-gated install of skills."""
+"""SkillsMP MCP server: search, read, scan, scan-gated install, and uninstall of skills."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

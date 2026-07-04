@@ -37,6 +37,14 @@ class InstallResult:
     reason: str
 
 
+@dataclass
+class UninstallResult:
+    skill_name: str
+    folder_name: str
+    status: str  # "removed" | "not_installed" | "error"
+    reason: str
+
+
 def _sanitize(component: str) -> str:
     cleaned = _UNSAFE.sub("-", component).strip("-._")
     if cleaned in ("", ".", ".."):
@@ -50,15 +58,30 @@ def _skill_dir_name(repo_name: str, skill_path: str) -> str:
     return base or repo_name
 
 
-def namespaced_folder_name(owner: str, repo: str, skill_path: str) -> str:
-    """Build ``<owner>-<repo>__<skill-dir>``, sanitized to a single safe segment."""
-    skill_dir = _skill_dir_name(repo, skill_path)
+def _folder_from_dir(owner: str, repo: str, skill_dir: str) -> str:
     raw = f"{_sanitize(owner)}-{_sanitize(repo)}__{_sanitize(skill_dir)}"
     # Final guard: collapse any residual separators and traversal tokens.
     safe = _UNSAFE.sub("-", raw)
     if safe in (".", "..", ""):
         return "skill"
     return safe
+
+
+def namespaced_folder_name(owner: str, repo: str, skill_path: str) -> str:
+    """Build ``<owner>-<repo>__<skill-dir>``, sanitized to a single safe segment."""
+    return _folder_from_dir(owner, repo, _skill_dir_name(repo, skill_path))
+
+
+def local_folder_name(owner: str, repo: str, skill_name: str) -> str:
+    """Namespaced folder for a bare skill directory name — no GitHub lookup.
+
+    ``install`` derives the folder from the resolved ``SKILL.md`` path; for
+    uninstall the caller only knows the skill directory, so resolve it locally.
+    Takes the last path segment and falls back to the repo name for a
+    root-level skill, matching ``namespaced_folder_name`` exactly.
+    """
+    skill_dir = skill_name.rsplit("/", 1)[-1] if skill_name else ""
+    return _folder_from_dir(owner, repo, skill_dir or repo)
 
 
 def evaluate_gate(
@@ -129,3 +152,29 @@ def install(
         target.write_bytes(data)
 
     return InstallResult(True, folder_name, dest, decision.reason)
+
+
+def uninstall(owner: str, repo: str, skill_name: str, install_root: Path) -> UninstallResult:
+    """Delete a previously installed skill's namespaced folder from the root.
+
+    Resolves the same ``<owner>-<repo>__<skill-dir>`` folder that ``install``
+    wrote (no network), then removes it. Reports ``not_installed`` for a missing
+    folder rather than raising, so a batch can keep going. Only ever removes a
+    direct child of ``install_root``.
+    """
+    folder_name = local_folder_name(owner, repo, skill_name)
+    install_root = Path(install_root)
+    dest = install_root / folder_name
+
+    # Defense in depth: the folder must be a direct child of the install root.
+    if dest.resolve().parent != install_root.resolve():
+        return UninstallResult(
+            skill_name, folder_name, "error", "refusing to remove: escapes the install root"
+        )
+    if not dest.exists():
+        return UninstallResult(skill_name, folder_name, "not_installed", "no such folder")
+    if not dest.is_dir():
+        return UninstallResult(skill_name, folder_name, "error", "not a directory")
+
+    shutil.rmtree(dest)
+    return UninstallResult(skill_name, folder_name, "removed", f"deleted {dest}")

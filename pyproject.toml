@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "skillsmp-mcp"
-version = "0.1.1"
-description = "MCP server for SkillsMP: search, read-only GitHub fetch, full Cisco AI Skill Scanner, and scan-gated install."
+version = "0.2.0"
+description = "MCP server for SkillsMP: search, read-only GitHub fetch, full Cisco AI Skill Scanner, scan-gated install, and bulk uninstall."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

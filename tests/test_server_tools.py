@@ -72,3 +72,27 @@ async def test_scan_skill_invokes_scanner(monkeypatch):
     assert "dir" in called  # scanner really ran
     # temp scan dir is cleaned up
     assert not called["dir"].exists()
+
+
+async def test_uninstall_skills_batch_mixed(monkeypatch, no_subprocess, tmp_path):
+    from skillsmp_mcp import config
+
+    # install_dir drives both install and uninstall; point it at a temp root.
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
+    installed = tmp_path / "anthropics-skills__pdf"
+    installed.mkdir(parents=True)
+    (installed / "SKILL.md").write_text("# PDF")
+
+    out = await server.uninstall_skills("anthropics/skills", ["pdf", "ghost"])
+
+    # The installed one is gone; the missing one is reported, not fatal.
+    assert not installed.exists()
+    assert "pdf" in out
+    assert "ghost" in out
+    assert "removed" in out.lower()
+    assert "not installed" in out.lower()
+
+
+async def test_uninstall_skills_bad_repo_rejected(no_subprocess):
+    out = await server.uninstall_skills("not-a-repo", ["pdf"])
+    assert "error" in out.lower()

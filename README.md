@@ -22,6 +22,7 @@ a real security scan — so there's nothing to trust but code you can read.
 | `read_skill(repo, skill_name)` | Fetch `SKILL.md` from a GitHub `owner/repo`, **read-only**. Never scans, never spawns a subprocess, never installs. |
 | `scan_skill(repo, skill_name)` | Full Cisco scan; reports findings only. |
 | `install_skill(repo, skill_name, force=False)` | Scan-gated install. Refuses on HIGH/CRITICAL unless `force=True`. |
+| `uninstall_skills(repo, skill_names)` | Remove one or more installed skills (bulk). No scan/network; reports per-skill results (removed / not installed / error). |
 
 ## Requirements
 
@@ -118,7 +119,7 @@ Fully quit and relaunch Claude Desktop after editing.
 | `SKILL_SCANNER_LLM_API_KEY` | recommended | — | Enables the LLM semantic analyzer. |
 | `SKILL_SCANNER_LLM_MODEL` | no | `anthropic/claude-sonnet-5` | LiteLLM model string. |
 | `GITHUB_TOKEN` | no | — | Read-only PAT; raises GitHub rate limit. |
-| `SKILLSMP_INSTALL_DIR` | no | `~/.claude/skills` | Install target. |
+| `SKILLSMP_INSTALL_DIR` | no | `~/.claude/skills` | Install/uninstall root. For repo-local skills, set it to e.g. `.claude/skills` in a project-scoped `.mcp.json`; both `install_skill` and `uninstall_skills` then operate on that root. |
 | `SKILLSMP_BLOCK_SEVERITIES` | no | `HIGH,CRITICAL` | Severities that block install. |
 | `SKILLSMP_SCANNER_CMD` | no | auto-detect | Override the scanner command. |
 | `SKILLSMP_SCANNER_POLICY` | no | — | Cisco policy preset (e.g. `strict`). |

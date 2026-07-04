@@ -2,7 +2,12 @@ import pytest
 
 from skillsmp_mcp import installer
 from skillsmp_mcp.github import ResolvedSkill
-from skillsmp_mcp.installer import GateDecision, evaluate_gate, namespaced_folder_name
+from skillsmp_mcp.installer import (
+    GateDecision,
+    evaluate_gate,
+    local_folder_name,
+    namespaced_folder_name,
+)
 from skillsmp_mcp.scanner import ScanResult
 
 BLOCK = {"HIGH", "CRITICAL"}
@@ -138,3 +143,74 @@ def test_install_rejects_traversal_in_relpath(tmp_path):
         installer.install(bad, _scan("SAFE", "LOW"), install_root=tmp_path, force=False, block_severities=BLOCK)
     # nothing escaped
     assert not (tmp_path.parent / "escape.txt").exists()
+
+
+# --- local_folder_name (uninstall resolution, no network) -----------------
+
+def test_local_folder_name_matches_install_folder():
+    # Resolving a bare skill dir must yield exactly what install wrote.
+    assert (
+        local_folder_name("anthropics", "skills", "pdf")
+        == namespaced_folder_name("anthropics", "skills", "pdf/SKILL.md")
+        == "anthropics-skills__pdf"
+    )
+
+
+def test_local_folder_name_takes_last_path_segment():
+    assert local_folder_name("o", "r", "nested/pdf") == "o-r__pdf"
+
+
+def test_local_folder_name_empty_falls_back_to_repo():
+    assert local_folder_name("o", "r", "") == "o-r__r"
+
+
+def test_local_folder_name_sanitizes_traversal():
+    name = local_folder_name("..", "..", "../etc")
+    assert name not in ("..", ".", "")
+    assert "/" not in name
+
+
+# --- uninstall (filesystem) ------------------------------------------------
+
+def test_uninstall_removes_existing_folder(tmp_path):
+    dest = tmp_path / "anthropics-skills__pdf"
+    dest.mkdir(parents=True)
+    (dest / "SKILL.md").write_text("# PDF")
+
+    result = installer.uninstall("anthropics", "skills", "pdf", install_root=tmp_path)
+
+    assert result.status == "removed"
+    assert result.folder_name == "anthropics-skills__pdf"
+    assert not dest.exists()
+
+
+def test_uninstall_reports_not_installed_when_missing(tmp_path):
+    result = installer.uninstall("anthropics", "skills", "pdf", install_root=tmp_path)
+    assert result.status == "not_installed"
+
+
+def test_uninstall_only_touches_matching_folder(tmp_path):
+    keep = tmp_path / "other-repo__keep"
+    keep.mkdir(parents=True)
+    (keep / "SKILL.md").write_text("# keep")
+    target = tmp_path / "anthropics-skills__pdf"
+    target.mkdir(parents=True)
+
+    installer.uninstall("anthropics", "skills", "pdf", install_root=tmp_path)
+
+    assert not target.exists()
+    assert keep.exists()
+
+
+def test_uninstall_traversal_name_cannot_escape_root(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "important.txt").write_text("do not delete")
+
+    result = installer.uninstall("..", "..", "../../victim", install_root=root)
+
+    # Sanitizing collapses traversal to a single in-root segment; nothing escapes.
+    assert result.status in ("not_installed", "error")
+    assert (victim / "important.txt").exists()
