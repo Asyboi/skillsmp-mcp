@@ -1,4 +1,4 @@
-"""FastMCP server: registers the five SkillsMP tools and formats their output.
+"""FastMCP server: registers the four SkillsMP tools and formats their output.
 
 Tool separation (SR9, §7): ``read_skill`` is pure read — no subprocess, no
 scan. ``scan_skill`` is the separately approvable scan. ``install_skill`` always
