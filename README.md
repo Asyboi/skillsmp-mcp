@@ -21,15 +21,41 @@ a real security scan — so there's nothing to trust but code you can read.
 | `scan_skill(repo, skill_name)` | Full Cisco scan; reports findings only. |
 | `install_skill(repo, skill_name, force=False)` | Scan-gated install. Refuses on HIGH/CRITICAL unless `force=True`. |
 
+## Requirements
+
+- **Python 3.10+**
+- A **SkillsMP API key** (`sk_live_...`) from [skillsmp.com](https://skillsmp.com) — the only hard requirement.
+- For `scan_skill` / `install_skill`: either [`uv`](https://docs.astral.sh/uv/)
+  installed (the server runs the scanner via `uvx` on demand) **or** the
+  `cisco-ai-skill-scanner` package installed directly. Without either, scans
+  return `SKIPPED` and installs are blocked.
+- Recommended: an **Anthropic API key** (`sk-ant-...`) to enable the LLM
+  semantic analyzer.
+
 ## Install
 
 ```bash
-# from the project dir
-uv pip install -e .            # or: pip install -e .
+git clone https://github.com/Asyboi/skillsmp-mcp.git
+cd skillsmp-mcp
 
-# the scanner is a separate tool (only needed for scan/install):
+# create an isolated env and install (uv shown; plain venv + pip works too)
+uv venv
+uv pip install -e .
+
+# optional: install the scanner directly instead of relying on uvx
 uv pip install cisco-ai-skill-scanner
-# ...or just have `uv` installed — the server will run it via uvx on demand.
+```
+
+This installs two ways to launch the server (use whichever your client prefers):
+
+- the console script **`skillsmp-mcp`** (on PATH inside the venv), or
+- **`python -m skillsmp_mcp`** — portable, no PATH juggling.
+
+Quick smoke test (no keys needed — lists the 4 tools over stdio, then exits):
+
+```bash
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}\n' \
+  | SKILLSMP_API_KEY=dummy .venv/bin/skillsmp-mcp
 ```
 
 ## Configure & register with Claude Desktop
@@ -44,7 +70,7 @@ Add to `claude_desktop_config.json` (macOS:
 
 ```json
 "skillsmp": {
-  "command": "skillsmp-mcp",
+  "command": "/absolute/path/to/skillsmp-mcp/.venv/bin/skillsmp-mcp",
   "env": {
     "SKILLSMP_API_KEY": "sk_live_...",
     "SKILL_SCANNER_LLM_API_KEY": "sk-ant-...",
@@ -58,9 +84,19 @@ too so the semantic analyzer runs — without it, scans fall back to static +
 behavioral only and can miss prose-based prompt injection. All other variables
 (see the table below) are optional and go in the same `env` block.
 
-If `skillsmp-mcp` isn't on PATH, use the venv's Python:
-`"command": "/path/to/.venv/bin/skillsmp-mcp"`. Fully quit and relaunch Claude
-Desktop after editing.
+**Use an absolute path for `command`.** GUI apps like Claude Desktop don't
+inherit your shell `PATH`, so a bare `skillsmp-mcp` often won't resolve. Point at
+the venv binary (shown above) — or use
+`"command": "/abs/path/.venv/bin/python", "args": ["-m", "skillsmp_mcp"]`.
+
+For the same reason, if you rely on `uvx` to run the scanner, set
+`SKILLSMP_SCANNER_CMD` to its absolute path so scanning works under the client:
+
+```json
+"SKILLSMP_SCANNER_CMD": "/Users/you/.local/bin/uvx --from cisco-ai-skill-scanner skill-scanner"
+```
+
+Fully quit and relaunch Claude Desktop after editing.
 
 ## Environment variables
 
@@ -75,7 +111,6 @@ Desktop after editing.
 | `SKILLSMP_SCANNER_CMD` | no | auto-detect | Override the scanner command. |
 | `SKILLSMP_SCANNER_POLICY` | no | — | Cisco policy preset (e.g. `strict`). |
 | `SKILLSMP_SCANNER_TIMEOUT` | no | `300` | Scan timeout (seconds). |
-| `SKILL_SCANNER_LLM_MODEL` | no | `anthropic/claude-sonnet-5` | LiteLLM model string for the semantic analyzer. |
 | `SKILLSMP_MAX_FILES` / `SKILLSMP_MAX_SINGLE_FILE_BYTES` / `SKILLSMP_MAX_TOTAL_BYTES` | no | `100` / `512000` / `5242880` | Fetch/scan size caps. |
 | `VIRUSTOTAL_API_KEY` / `AI_DEFENSE_API_KEY` | no | — | Optional cloud engines. |
 
@@ -104,3 +139,19 @@ way.
 - `scanner.py` — analyzer selection, extra engines, custom result parsing.
 - `installer.py` — post-install hooks (e.g. write an index entry to a vault).
 - `server.py` — register more `@mcp.tool()` functions.
+
+## Development
+
+```bash
+uv pip install -e ".[dev]"
+pytest                       # full suite (unit + parsing + gating)
+python -m py_compile src/skillsmp_mcp/*.py
+```
+
+Tests are offline by default — network clients are driven with
+`httpx.MockTransport` and the scanner logic is unit-tested with fake reports, so
+`pytest` needs no keys or the Cisco scanner.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

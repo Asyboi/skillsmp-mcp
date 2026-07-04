@@ -9,11 +9,28 @@ description = "MCP server for SkillsMP: search, read-only GitHub fetch, full Cis
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Aslan" }]
+authors = [{ name = "Aslan Wang", email = "aslanwang187@gmail.com" }]
+keywords = ["mcp", "skillsmp", "claude", "security-scanner", "cisco", "skills"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "mcp>=1.2.0",
     "httpx>=0.27",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Asyboi/skillsmp-mcp"
+Repository = "https://github.com/Asyboi/skillsmp-mcp"
+Issues = "https://github.com/Asyboi/skillsmp-mcp/issues"
 
 [project.optional-dependencies]
 dev = [
